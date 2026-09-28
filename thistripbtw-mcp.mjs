@@ -401,7 +401,7 @@ const KEPT_TOOL = {
     type: "object",
     properties: {
       link: { type: "string",
-        description: "The kept trip's link, e.g. https://thistripbtw.us/abc1234#k=treeline-downpour-rolling-switchback. The whole URL is fine." },
+        description: "The kept trip's link, e.g. https://thistripbtw.us/abc1234#k=lagoon-passport-teal-teal. The whole URL is fine." },
     },
     required: ["link"],
   },
@@ -693,7 +693,7 @@ async function handle(req) {
          asks, and it said 1.0.0 for the whole life of 1.1.0, which is the release that added
          read_trip_link. A client feature-detecting on version would have concluded the tool
          was not there. */
-      serverInfo: { name: "thistripbtw", version: "1.3.3" },
+      serverInfo: { name: "thistripbtw", version: "1.3.4" },
     });
   }
   if (method === "tools/list") return ok(id, { tools: [TOOL, FIND_TOOL, AMEND_TOOL, READ_TOOL, KEPT_TOOL, ADD_TOOL] });
