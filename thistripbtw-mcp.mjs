@@ -213,6 +213,26 @@ function amendLink(input) {
   if (input.legs   !== undefined) next.legs   = legsOf({ legs: input.legs });     // REPLACES
   const add = legsOf({ legs: input.add });
   if (add.length) next.legs = next.legs.concat(add);                              // APPENDS
+  /* D-204: change ONE leg without resending the rest. The agent that asked for it (2026-09-29)
+     had just resent five legs to put a hotel on one, and a model that retypes five legs will
+     eventually retype one wrong. `set` merges into the leg; a key set to null clears it. Applied
+     after legs/add so a just-added leg can be updated in the same call, before remove so the
+     numbers a caller can see are the numbers it means. Mirrored in mcp_amend_link(). */
+  let updated = 0;
+  if (input.update !== undefined) {
+    const ups = Array.isArray(input.update) ? input.update : [input.update];
+    for (const u of ups) {
+      const idx = Number(u && u.leg);
+      if (!Number.isInteger(idx) || idx < 1 || idx > next.legs.length)
+        throw new Error(`update.leg must be a leg number from 1 to ${next.legs.length}`);
+      if (!u.set || typeof u.set !== "object" || Array.isArray(u.set))
+        throw new Error(`update.set must be an object of leg fields to change, e.g. {"lodging":"Red Cliffs Lodge"}`);
+      const leg = { ...next.legs[idx - 1] };
+      for (const k of Object.keys(u.set)) { if (u.set[k] === null) delete leg[k]; else leg[k] = u.set[k]; }
+      next.legs[idx - 1] = leg;
+      updated++;
+    }
+  }
   if (input.remove !== undefined) {
     const idx = Number(input.remove);
     if (!Number.isInteger(idx) || idx < 1 || idx > next.legs.length)
@@ -221,7 +241,7 @@ function amendLink(input) {
   }
   const built = buildLink(next);
   return { ...built, changed: { name: input.name !== undefined, origin: input.origin !== undefined,
-           replaced: input.legs !== undefined, added: add.length, removed: input.remove !== undefined } };
+           replaced: input.legs !== undefined, added: add.length, updated, removed: input.remove !== undefined } };
 }
 
 /* ── the tool, as the model sees it ────────────────────────────────────────────────────── */
@@ -319,17 +339,31 @@ const READ_TOOL = {
 const AMEND_TOOL = {
   name: "amend_trip_link",
   description:
-    "Update a trip link you already built — add legs, replace them, rename, or drop one — and get " +
-    "the new link back. Use this instead of building a fresh link every time the plan changes, so " +
-    "the person holds one link that grows. Takes a draft link (#d=) plus the changes; no network, " +
-    "no password, the trip is inside the link. For a KEPT trip (#k=) use add_to_kept_trip.",
+    "Update a trip link you already built — add legs, change one leg's fields, replace them all, " +
+    "rename, or drop one — and get the new link back. Use this instead of building a fresh link " +
+    "every time the plan changes, so the person holds one link that grows. To change ONE leg (its " +
+    "lodging, date, note, who is on it) use `update` rather than resending every leg through " +
+    "`legs`. Takes a draft link (#d=) plus the changes; no network, no password, the trip is " +
+    "inside the link. For a KEPT trip (#k=) use add_to_kept_trip.",
   inputSchema: {
     type: "object",
     properties: {
       link:   { type: "string", description: "The existing draft link, whole URL or just the #d= fragment." },
       add:    { type: "array", items: LEG, description: "Legs to APPEND after the last one." },
       legs:   { type: "array", items: LEG, description: "REPLACES every leg. Omit to keep them." },
-      remove: { type: "integer", description: "Drop leg number N (1-based). Applied after add/legs." },
+      update: {
+        type: "array",
+        description: "Change fields on existing legs without resending the rest. Each item names a leg (1-based) and the fields to set; a field set to null is cleared. Applied after add/legs, before remove.",
+        items: {
+          type: "object",
+          properties: {
+            leg: { type: "integer", description: "Which leg, 1-based." },
+            set: { ...LEG, required: [], description: "The fields to change — any leg field: to, mode, date, note, who, lodging, stayNote, flight, subtype, craft." },
+          },
+          required: ["leg", "set"],
+        },
+      },
+      remove: { type: "integer", description: "Drop leg number N (1-based). Applied after add/legs/update." },
       name:   { type: "string", description: "New trip name." },
       origin: { ...PLACE, description: "New starting point." },
     },
@@ -655,7 +689,7 @@ for (const [tool, annotations, outputSchema] of [
         link: LINK_OUT, legs: { type: "integer" },
         changed: { type: "object", description: "What this call actually altered.",
           properties: { name: { type: "boolean" }, origin: { type: "boolean" }, replaced: { type: "boolean" },
-                        added: { type: "integer" }, removed: { type: "boolean" } } } },
+                        added: { type: "integer" }, updated: { type: "integer" }, removed: { type: "boolean" } } } },
       required: ["link", "legs", "changed"] }],
   [READ_TOOL, { title: "Read a trip link", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     { type: "object", properties: { trip: TRIP_OUT, legs: { type: "integer" }, summary: { type: "string" } },
@@ -693,7 +727,7 @@ async function handle(req) {
          asks, and it said 1.0.0 for the whole life of 1.1.0, which is the release that added
          read_trip_link. A client feature-detecting on version would have concluded the tool
          was not there. */
-      serverInfo: { name: "thistripbtw", version: "1.3.4" },
+      serverInfo: { name: "thistripbtw", version: "1.3.5" },
     });
   }
   if (method === "tools/list") return ok(id, { tools: [TOOL, FIND_TOOL, AMEND_TOOL, READ_TOOL, KEPT_TOOL, ADD_TOOL] });
@@ -831,6 +865,17 @@ if (process.argv.includes("--selftest")) {
     if (r.legs !== 1 || !r.changed.replaced) throw new Error("replace left " + r.legs);
   });
   throws("amend refuses a remove index off the end", () => amendLink({ link: buildLink(trip).url, remove: 9 }), "from 1 to 2");
+  t("amend updates one leg and leaves the others alone (D-204)", () => {
+    const first = buildLink({ ...trip, legs: [{ to: { name: "Moab, UT", lat: 38.57, lng: -109.55 }, date: "2026-10-09", note: "keep me" }, { to: { lat: 5, lng: 5 } }] }).url;
+    const r = amendLink({ link: first, update: [{ leg: 1, set: { lodging: "Red Cliffs Lodge", date: null } }] });
+    if (r.changed.updated !== 1 || r.legs !== 2) throw new Error(JSON.stringify(r.changed));
+    const back = readLink({ link: r.url }).trip.legs;
+    if (back[0].lodging !== "Red Cliffs Lodge" || back[0].note !== "keep me" || back[0].date !== undefined || back[0].to.name !== "Moab, UT")
+      throw new Error("leg 1 after update: " + JSON.stringify(back[0]));
+    if (back[1].to.lat !== 5) throw new Error("leg 2 was touched");
+  });
+  throws("amend refuses an update index off the end", () => amendLink({ link: buildLink(trip).url, update: [{ leg: 3, set: { note: "x" } }] }), "from 1 to 2");
+  throws("amend refuses an update with no set", () => amendLink({ link: buildLink(trip).url, update: [{ leg: 1 }] }), "update.set must be");
   /* The network tools are async and can only REJECT, so their argument checks live in sync
      functions the harness can call: placeQuery() here, keptParts() + point() for add_to_kept —
      and keptParts' refusal of a #d= link is already asserted above. */

@@ -14,6 +14,9 @@ one turns legs into a URL, one changes a URL you already built, one decodes a UR
 one reads a trip the person has bought, and one adds a stop to it. The person opens it and their
 trip is already drawn on a real map — free, editable, theirs.
 
+**→ [What to say](https://thistripbtw.us/recipes)** — the phrasing that triggers each tool, with the
+links those calls produced.
+
 **→ [thistripbtw.us](https://thistripbtw.us)** — the human side, and the thing that pays for this.
 The server is free and asks for nothing; the site's one-time paid tiers fund it rather than an ad
 business or your data.
@@ -104,8 +107,9 @@ the only step that needs the network besides the kept-trip tools; it asks thistr
 answers from its own cache in front of a paced OpenStreetMap lookup. A place name is not personal
 data, and nothing about the person is sent.
 
-**`amend_trip_link`** — a draft link plus changes, a new link back. `add` appends legs, `legs`
-replaces them all, `remove` drops leg N, `name` and `origin` do what they say. No network, no
+**`amend_trip_link`** — a draft link plus changes, a new link back. `add` appends legs, `update`
+changes fields on one leg (`[{leg: 2, set: {lodging: "Red Cliffs Lodge"}}]`, null clears a field),
+`legs` replaces them all, `remove` drops leg N, `name` and `origin` do what they say. No network, no
 password: the trip is inside the link. Tell the person the new link replaces the old one.
 
 **`add_to_kept_trip`** — one stop, added to a trip the person has KEPT, on their behalf: *"add the
